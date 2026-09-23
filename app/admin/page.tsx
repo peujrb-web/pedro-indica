@@ -22,7 +22,7 @@ import {
   X,
   Loader2,
   Image as ImageIcon,
-  Download,
+  Save,
   RotateCcw
 } from 'lucide-react';
 import Image from 'next/image';
@@ -30,6 +30,7 @@ import Image from 'next/image';
 export default function AdminGroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -54,14 +55,61 @@ export default function AdminGroupsPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
-    const loaded = getStoredGroups();
-    setGroups(loaded);
-    setLoading(false);
+    async function init() {
+      try {
+        const res = await fetch('/api/content');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.groups && data.groups.length > 0) {
+            setGroups(data.groups);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {}
+
+      const loaded = getStoredGroups();
+      setGroups(loaded);
+      setLoading(false);
+    }
+    init();
   }, []);
 
   const persistGroups = (updated: Group[]) => {
     setGroups(updated);
     saveStoredGroups(updated);
+  };
+
+  const handlePublishAll = async (groupsToPublish?: Group[]) => {
+    setPublishing(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const targetGroups = groupsToPublish || groups;
+
+    try {
+      const res = await fetch('/api/admin/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groups: targetGroups }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Falha ao publicar alterações no servidor.');
+        setPublishing(false);
+        return;
+      }
+
+      persistGroups(targetGroups);
+      setSuccessMsg('✓ Alterações publicadas com sucesso! Todos os visitantes já veem a versão atualizada.');
+    } catch {
+      setErrorMsg('Erro ao conectar com o servidor para publicar.');
+    } finally {
+      setPublishing(false);
+      setTimeout(() => setSuccessMsg(null), 5000);
+    }
   };
 
   const openCreateModal = () => {
@@ -109,7 +157,7 @@ export default function AdminGroupsPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleSaveGroup = (e: React.FormEvent) => {
+  const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setErrorMsg(null);
@@ -156,31 +204,27 @@ export default function AdminGroupsPage() {
       updated_at: new Date().toISOString(),
     };
 
+    let updatedList: Group[] = [];
     if (editingGroup) {
-      const updated = groups.map((g) => (g.id === editingGroup.id ? { ...g, ...payload } : g));
-      persistGroups(updated);
-      setSuccessMsg(`Grupo "${payload.title}" atualizado com sucesso!`);
+      updatedList = groups.map((g) => (g.id === editingGroup.id ? { ...g, ...payload } : g));
     } else {
       const created: Group = {
         id: `g-${Date.now()}`,
         ...payload,
       };
-      persistGroups([...groups, created]);
-      setSuccessMsg(`Novo grupo "${payload.title}" criado com sucesso!`);
+      updatedList = [...groups, created];
     }
 
     setIsModalOpen(false);
     setSaving(false);
-    setTimeout(() => setSuccessMsg(null), 4000);
+    await handlePublishAll(updatedList);
   };
 
   const handleToggleActive = (group: Group) => {
     const updated = groups.map((g) =>
       g.id === group.id ? { ...g, is_active: !g.is_active } : g
     );
-    persistGroups(updated);
-    setSuccessMsg(`Status do grupo "${group.title}" alterado.`);
-    setTimeout(() => setSuccessMsg(null), 3000);
+    handlePublishAll(updated);
   };
 
   const handleMoveOrder = (group: Group, direction: 'up' | 'down') => {
@@ -198,25 +242,19 @@ export default function AdminGroupsPage() {
     currentGroup.sort_order = targetGroup.sort_order;
     targetGroup.sort_order = tempOrder;
 
-    persistGroups([...sorted]);
-    setSuccessMsg('Ordem dos grupos atualizada!');
-    setTimeout(() => setSuccessMsg(null), 3000);
+    handlePublishAll([...sorted]);
   };
 
   const handleDeleteGroup = () => {
     if (!deleteConfirmGroup) return;
     const updated = groups.filter((g) => g.id !== deleteConfirmGroup.id);
-    persistGroups(updated);
-    setSuccessMsg(`Grupo "${deleteConfirmGroup.title}" excluído.`);
     setDeleteConfirmGroup(null);
-    setTimeout(() => setSuccessMsg(null), 4000);
+    handlePublishAll(updated);
   };
 
   const handleResetDefaults = () => {
     if (confirm('Deseja restaurar os 6 grupos originais de padrão?')) {
-      persistGroups(initialGroups);
-      setSuccessMsg('Grupos restaurados para o padrão original!');
-      setTimeout(() => setSuccessMsg(null), 4000);
+      handlePublishAll(initialGroups);
     }
   };
 
@@ -234,22 +272,39 @@ export default function AdminGroupsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={handleResetDefaults}
-            title="Restaurar padrão"
-            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-semibold text-xs text-slate-400 hover:text-white bg-slate-900 border border-slate-800"
+            onClick={() => handlePublishAll()}
+            disabled={publishing}
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl font-extrabold text-xs text-slate-950 bg-gradient-to-r from-brand-cyan to-brand-lime hover:from-cyan-300 hover:to-emerald-300 shadow-neon-cyan active:scale-95 touch-target disabled:opacity-50"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Restaurar Padrão</span>
+            {publishing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                <span>Publicando...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 text-slate-950" />
+                <span>Publicar Alterações</span>
+              </>
+            )}
           </button>
 
           <button
             onClick={openCreateModal}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm text-slate-950 bg-gradient-to-r from-brand-lime to-emerald-400 hover:from-lime-300 hover:to-emerald-300 transition-all shadow-neon-lime touch-target"
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-xs text-slate-100 bg-slate-900 border border-slate-700 hover:border-slate-500 touch-target"
           >
-            <Plus className="w-5 h-5 text-slate-950" />
+            <Plus className="w-4 h-4 text-brand-lime" />
             <span>Novo Grupo</span>
+          </button>
+
+          <button
+            onClick={handleResetDefaults}
+            title="Restaurar padrão"
+            className="p-3 rounded-xl text-slate-400 hover:text-white bg-slate-900 border border-slate-800"
+          >
+            <RotateCcw className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -585,7 +640,7 @@ export default function AdminGroupsPage() {
                       <span>Salvando...</span>
                     </>
                   ) : (
-                    <span>Salvar Grupo</span>
+                    <span>Salvar & Publicar</span>
                   )}
                 </button>
               </div>

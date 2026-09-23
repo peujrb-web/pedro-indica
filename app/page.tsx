@@ -17,18 +17,31 @@ export default function HomePage() {
   const [groups, setGroups] = useState<Group[]>(initialGroups);
 
   useEffect(() => {
-    // Sincronizar dados gerenciados pelo painel administrativo
-    const storedSettings = getStoredSettings();
-    const storedGroups = getStoredGroups();
+    async function loadContent() {
+      try {
+        const res = await fetch('/api/content', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.settings) setSettings(data.settings);
+          if (data.groups && data.groups.length > 0) setGroups(data.groups);
+          return;
+        }
+      } catch {
+        // Fallback para LocalStorage se desconectado
+      }
 
-    setSettings(storedSettings);
-    
-    // Filtrar apenas grupos ativos e ordenar por sort_order
-    const activeGroups = storedGroups
-      .filter((g) => g.is_active)
-      .sort((a, b) => a.sort_order - b.sort_order);
+      const storedSettings = getStoredSettings();
+      const storedGroups = getStoredGroups();
 
-    setGroups(activeGroups.length > 0 ? activeGroups : initialGroups);
+      setSettings(storedSettings);
+      const activeGroups = storedGroups
+        .filter((g) => g.is_active)
+        .sort((a, b) => a.sort_order - b.sort_order);
+
+      setGroups(activeGroups.length > 0 ? activeGroups : initialGroups);
+    }
+
+    loadContent();
   }, []);
 
   return (
@@ -36,7 +49,7 @@ export default function HomePage() {
       {/* Rastreamento de Analytics */}
       <AnalyticsTracker groups={groups} />
 
-      {/* Cabeçalho */}
+      {/* Cabeçalho com Logo em Destaque */}
       <Header logoUrl={settings.logo_url} />
 
       {/* Main Content */}
@@ -53,7 +66,7 @@ export default function HomePage() {
         {/* Seção Lista de Grupos */}
         <section id="grupos" className="py-8 px-4 max-w-4xl mx-auto scroll-mt-20">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 text-xs font-extrabold text-brand-lime uppercase tracking-widest bg-emerald-950/60 px-4 py-1.5 rounded-full border border-emerald-500/40 mb-3 shadow-neon-lime">
+            <div className="inline-flex items-center gap-2 text-xs font-extrabold text-brand-lime uppercase tracking-widest bg-emerald-950/70 px-4 py-1.5 rounded-full border border-emerald-500/40 mb-3 shadow-neon-lime">
               <Sparkles className="w-3.5 h-3.5" />
               <span>Canais de transmissao</span>
             </div>

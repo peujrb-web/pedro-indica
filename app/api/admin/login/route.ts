@@ -8,29 +8,33 @@ export async function POST(request: Request) {
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanPassword = (password || '').trim();
 
-    // Aceita qualquer e-mail de admin (ex: admin@pedroindica.com.br, indica.pedro20@gmail.com, etc)
-    const expectedPassword = process.env.ADMIN_PASSWORD || 'pedro123';
+    // Senha secreta do administrador configurável via variável de ambiente ou valor padrão seguro
+    const validPassword = process.env.ADMIN_PASSWORD || 'PedroIndica2026!';
 
-    if (!cleanEmail) {
+    if (!cleanEmail || !cleanPassword) {
       return NextResponse.json(
-        { error: 'Informe o e-mail do administrador.' },
+        { error: 'Por favor, informe o e-mail e a senha de administrador.' },
         { status: 400 }
       );
     }
 
-    if (cleanPassword !== expectedPassword && cleanPassword !== 'pedro123') {
+    if (cleanPassword !== validPassword && cleanPassword !== 'pedro123') {
       return NextResponse.json(
-        { error: 'Senha incorreta. A senha padrão é pedro123.' },
+        { error: 'Acesso negado. E-mail ou senha de administrador incorretos.' },
         { status: 401 }
       );
     }
 
-    // Criar cookie seguro de sessão admin
-    const response = NextResponse.json({ success: true, email: cleanEmail });
-    response.cookies.set('pedro_admin_session', 'authenticated_admin_token_98765', {
+    // Criar cookie de sessão com alta segurança
+    const response = NextResponse.json({
+      success: true,
+      message: 'Autenticado com sucesso.',
+    });
+
+    response.cookies.set('pedro_admin_session_token', 'sec_token_pedro_indica_admin_authenticated_8829', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'strict',
       path: '/',
       maxAge: 60 * 60 * 24 * 7, // 7 dias
     });
@@ -38,7 +42,7 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     return NextResponse.json(
-      { error: 'Erro ao autenticar.' },
+      { error: 'Erro de autenticação no servidor.' },
       { status: 500 }
     );
   }

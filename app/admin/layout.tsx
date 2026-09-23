@@ -13,7 +13,6 @@ export default function AdminLayout({
   const pathname = usePathname();
   const router = useRouter();
 
-  // Se for a tela de login, não exibir a barra admin completa
   if (pathname === '/admin/login') {
     return <>{children}</>;
   }
@@ -36,22 +35,20 @@ export default function AdminLayout({
   return (
     <div className="min-h-screen bg-brand-dark flex flex-col">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-40 bg-brand-dark/95 border-b border-slate-800 px-4 py-3 backdrop-blur-md">
+      <header className="sticky top-0 z-40 bg-brand-dark/95 border-b border-slate-800 px-4 py-3.5 backdrop-blur-md">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="logo-container py-1 px-3">
-              <div className="relative h-8 w-28 sm:h-9 sm:w-32">
-                <Image
-                  src="/logo.png"
-                  alt="Pedro Indica Admin"
-                  fill
-                  className="object-contain"
-                />
-              </div>
-            </div>
+            <Link href="/admin" className="relative h-10 w-32 sm:h-11 sm:w-36 flex-shrink-0">
+              <Image
+                src="/logo.png"
+                alt="Pedro Indica Admin"
+                fill
+                className="object-contain object-left"
+              />
+            </Link>
             <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-[11px] font-extrabold shadow-neon-lime">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              Painel Local 100% Ativo
+              Painel Protegido
             </span>
           </div>
 

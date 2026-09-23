@@ -5,12 +5,6 @@ import { SiteSettings } from '@/lib/types';
 import { SiteSettingsSchema } from '@/lib/validations';
 import { initialSiteSettings } from '@/lib/data/initial-data';
 import {
-  getStoredSettings,
-  saveStoredSettings,
-  getStoredAdminPassword,
-  saveStoredAdminPassword
-} from '@/lib/local-storage';
-import {
   Settings,
   Upload,
   Eye,
@@ -38,6 +32,7 @@ export default function AdminSettingsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Alteração de Senha
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -45,9 +40,17 @@ export default function AdminSettingsPage() {
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
-    const loaded = getStoredSettings();
-    setSettings(loaded);
-    setLoading(false);
+    async function load() {
+      try {
+        const res = await fetch('/api/content');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.settings) setSettings(data.settings);
+        }
+      } catch {}
+      setLoading(false);
+    }
+    load();
   }, []);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,15 +63,16 @@ export default function AdminSettingsPage() {
       setSettings((prev) => ({ ...prev, logo_url: reader.result as string }));
       setUploadingLogo(false);
       setSuccessMsg('Logo carregada! Clique em "Publicar Alterações" para salvar.');
-      setTimeout(() => setSuccessMsg(null), 3000);
+      setTimeout(() => setSuccessMsg(null), 4000);
     };
     reader.readAsDataURL(file);
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     // Validação Zod
     const validation = SiteSettingsSchema.safeParse(settings);
@@ -79,36 +83,70 @@ export default function AdminSettingsPage() {
       return;
     }
 
-    // Processar nova senha se preenchida
-    if (newPassword || confirmPassword) {
+    // Processar alteração de senha se preenchida
+    if (newPassword || confirmPassword || currentPassword) {
+      if (!currentPassword) {
+        setErrorMsg('Por favor, informe a senha atual para confirmar a alteração.');
+        setSaving(false);
+        return;
+      }
       if (newPassword.length < 4) {
         setErrorMsg('A nova senha deve ter pelo menos 4 caracteres.');
         setSaving(false);
         return;
       }
       if (newPassword !== confirmPassword) {
-        setErrorMsg('As senhas digitadas não coincidem.');
+        setErrorMsg('A nova senha e a confirmação não coincidem.');
         setSaving(false);
         return;
       }
-      saveStoredAdminPassword(newPassword);
-      setNewPassword('');
-      setConfirmPassword('');
+
+      try {
+        const passRes = await fetch('/api/admin/password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword, newPassword }),
+        });
+
+        const passData = await passRes.json();
+        if (!passRes.ok) {
+          setErrorMsg(passData.error || 'Erro ao alterar a senha.');
+          setSaving(false);
+          return;
+        }
+
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } catch {
+        setErrorMsg('Erro ao conectar com o servidor de alteração de senha.');
+        setSaving(false);
+        return;
+      }
     }
 
-    // Salvar configurações no LocalStorage
-    saveStoredSettings(settings);
-    setSuccessMsg('Configurações do site e marca salvas com sucesso!');
-    setSaving(false);
-    setTimeout(() => setSuccessMsg(null), 4000);
-  };
+    // Publicar configurações no servidor
+    try {
+      const res = await fetch('/api/admin/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings }),
+      });
 
-  const handleResetSettingsDefaults = () => {
-    if (confirm('Restaurar os textos e logo para a configuração padrão?')) {
-      setSettings(initialSiteSettings);
-      saveStoredSettings(initialSiteSettings);
-      setSuccessMsg('Configurações restauradas para o padrão!');
-      setTimeout(() => setSuccessMsg(null), 3000);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Erro ao publicar configurações.');
+        setSaving(false);
+        return;
+      }
+
+      setSuccessMsg('✓ Configurações e marca publicadas no servidor com sucesso!');
+    } catch {
+      setErrorMsg('Erro de conexão ao publicar configurações.');
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSuccessMsg(null), 5000);
     }
   };
 
@@ -136,16 +174,6 @@ export default function AdminSettingsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleResetSettingsDefaults}
-            title="Restaurar padrão"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-900 border border-slate-800"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Padrão</span>
-          </button>
-
           <button
             type="button"
             onClick={() => setShowPreview(!showPreview)}
@@ -189,15 +217,13 @@ export default function AdminSettingsPage() {
 
           {/* Mini Header Preview */}
           <div className="flex items-center justify-between p-3 bg-slate-950/90 rounded-xl border border-slate-800">
-            <div className="logo-container py-0.5 px-2">
-              <div className="relative h-8 w-28">
-                <Image
-                  src={settings.logo_url || '/logo.png'}
-                  alt="Logo Preview"
-                  fill
-                  className="object-contain"
-                />
-              </div>
+            <div className="relative h-10 w-32">
+              <Image
+                src={settings.logo_url || '/logo.png'}
+                alt="Logo Preview"
+                fill
+                className="object-contain"
+              />
             </div>
             <span className="text-xs text-brand-cyan font-bold">Ver grupos ↓</span>
           </div>
@@ -225,7 +251,7 @@ export default function AdminSettingsPage() {
 
       {/* Formulário Principal de Configurações */}
       <form onSubmit={handleSaveSettings} className="space-y-6">
-        {/* Bloco 1: Logo da Marca */}
+        {/* Bloco 1: Logo da Marca com Redimensionamento Limpo */}
         <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
             <ImageIcon className="w-5 h-5 text-brand-cyan" />
@@ -233,15 +259,13 @@ export default function AdminSettingsPage() {
           </h2>
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-            <div className="logo-container p-3">
-              <div className="relative w-40 h-16">
-                <Image
-                  src={settings.logo_url || '/logo.png'}
-                  alt="Logo Atual"
-                  fill
-                  className="object-contain"
-                />
-              </div>
+            <div className="relative h-14 w-44 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+              <Image
+                src={settings.logo_url || '/logo.png'}
+                alt="Logo Atual"
+                fill
+                className="object-contain"
+              />
             </div>
 
             <div className="space-y-2">
@@ -257,20 +281,33 @@ export default function AdminSettingsPage() {
                 />
               </label>
               <p className="text-[11px] text-slate-400">
-                Formatos suportados: PNG, SVG ou JPG. Exibida com moldura iluminada no topo e login.
+                Formatos recomendados: PNG ou SVG transparente.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Bloco 2: Alteração de Senha */}
+        {/* Bloco 2: Alteração Segura de Senha */}
         <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
             <Key className="w-5 h-5 text-brand-lime" />
             Alterar Senha do Administrador
           </h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Senha Atual
+              </label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Informe sua senha atual..."
+                className="w-full bg-slate-900 border border-slate-700 focus:border-brand-cyan rounded-xl px-4 py-2.5 text-sm text-white outline-none"
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
                 Nova Senha
@@ -298,7 +335,7 @@ export default function AdminSettingsPage() {
             </div>
           </div>
           <p className="text-[11px] text-slate-400">
-            Deixe os campos de senha em branco se desejar manter a senha atual.
+            Deixe os campos de senha em branco se não quiser alterar sua senha de acesso.
           </p>
         </div>
 

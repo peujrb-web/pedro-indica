@@ -14,18 +14,16 @@ export function Header({ logoUrl }: HeaderProps) {
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-brand-dark/90 border-b border-slate-800/80 px-4 py-3.5">
       <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-        {/* Logo Pedro Indica com Destaque Neon Imponente */}
+        {/* Logo Pedro Indica com Exibição Limpa, Elegante e Redimensionada */}
         <div className="flex items-center gap-3">
-          <Link href="/" className="logo-container py-1.5 px-4 rounded-2xl bg-slate-900/90 border border-brand-cyan/60 shadow-neon-cyan transition-transform duration-300 hover:scale-105">
-            <div className="relative h-12 w-36 sm:h-14 sm:w-44 flex-shrink-0">
-              <Image
-                src={finalLogoUrl}
-                alt="Pedro Indica"
-                fill
-                className="object-contain"
-                priority
-              />
-            </div>
+          <Link href="/" className="relative h-12 w-40 sm:h-14 sm:w-48 flex-shrink-0 transition-transform hover:scale-105">
+            <Image
+              src={finalLogoUrl}
+              alt="Pedro Indica"
+              fill
+              className="object-contain object-left"
+              priority
+            />
           </Link>
 
           <p className="hidden md:block text-xs font-semibold text-slate-300 border-l border-slate-700/80 pl-3 max-w-xs leading-tight">

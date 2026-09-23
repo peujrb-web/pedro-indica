@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { SiteSettings } from '@/lib/types';
 import { SiteSettingsSchema } from '@/lib/validations';
+import { initialSiteSettings } from '@/lib/data/initial-data';
+import {
+  getStoredSettings,
+  saveStoredSettings,
+  getStoredAdminPassword,
+  saveStoredAdminPassword
+} from '@/lib/local-storage';
 import {
   Settings,
   Upload,
@@ -17,110 +23,54 @@ import {
   FileText,
   Search,
   MessageCircle,
-  ShieldCheck
+  ShieldCheck,
+  Key,
+  RotateCcw
 } from 'lucide-react';
 import Image from 'next/image';
 
-const defaultSettings: SiteSettings = {
-  id: 'default',
-  logo_url: '/logo.png',
-  hero_badge: 'Comunidade de ofertas',
-  hero_title: 'Entre nos grupos e receba promoções que valem a pena.',
-  hero_subtitle: 'Achados, descontos e cupons selecionados diretamente no seu WhatsApp.',
-  cta_text: 'Ver grupos disponíveis',
-  trust_text: 'Gratuito • Sem spam • Saia quando quiser',
-  benefits_title: 'Por que fazer parte da nossa comunidade?',
-  benefit_1_title: 'Ofertas selecionadas',
-  benefit_1_desc: 'Só compartilhamos oportunidades que merecem sua atenção.',
-  benefit_2_title: 'Direto no WhatsApp',
-  benefit_2_desc: 'As melhores promoções chegam sem você precisar procurar.',
-  benefit_3_title: 'Grupos organizados',
-  benefit_3_desc: 'Entre apenas nos temas que realmente interessam a você.',
-  footer_text: 'Boas oportunidades, no momento certo.',
-  footer_disclaimer: 'Os grupos são gratuitos. Não enviamos mensagens privadas solicitando pagamentos.',
-  seo_title: 'Pedro Indica - Promoções, Cupons e Oportunidades no WhatsApp',
-  seo_description: 'Receba em primeira mão ofertas imperdíveis e cupons de desconto selecionados no seu WhatsApp.',
-  seo_og_image: null,
-};
-
 export default function AdminSettingsPage() {
-  const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
+  const [settings, setSettings] = useState<SiteSettings>(initialSiteSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Alteração de Senha
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   // Toggle de Pré-visualização
   const [showPreview, setShowPreview] = useState(false);
 
-  const supabase = createClient();
-
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('site_settings')
-          .select('*')
-          .eq('id', 'default')
-          .single();
-
-        if (!error && data) {
-          setSettings({ ...defaultSettings, ...data });
-        }
-      } catch {
-        setSettings(defaultSettings);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchSettings();
+    const loaded = getStoredSettings();
+    setSettings(loaded);
+    setLoading(false);
   }, []);
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploadingLogo(true);
-    try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `logo-${Date.now()}.${fileExt}`;
-      const filePath = `brand/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('pedro-indica-assets')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        // Fallback local se a storage ainda não foi inicializada no Supabase remoto
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setSettings((prev) => ({ ...prev, logo_url: reader.result as string }));
-          setUploadingLogo(false);
-        };
-        reader.readAsDataURL(file);
-        return;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from('pedro-indica-assets')
-        .getPublicUrl(filePath);
-
-      setSettings((prev) => ({ ...prev, logo_url: publicUrlData.publicUrl }));
-    } catch {
-      setErrorMsg('Falha ao enviar logo.');
-    } finally {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSettings((prev) => ({ ...prev, logo_url: reader.result as string }));
       setUploadingLogo(false);
-    }
+      setSuccessMsg('Logo carregada! Clique em "Publicar Alterações" para salvar.');
+      setTimeout(() => setSuccessMsg(null), 3000);
+    };
+    reader.readAsDataURL(file);
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setErrorMsg(null);
 
-    // Validação com Zod
+    // Validação Zod
     const validation = SiteSettingsSchema.safeParse(settings);
     if (!validation.success) {
       const firstErr = validation.error.errors[0]?.message || 'Verifique os campos inseridos.';
@@ -129,29 +79,36 @@ export default function AdminSettingsPage() {
       return;
     }
 
-    const payload = {
-      ...settings,
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      const { error } = await supabase
-        .from('site_settings')
-        .upsert(payload);
-
-      if (!error) {
-        await supabase.from('audit_logs').insert({
-          action: 'UPDATE_SETTINGS',
-          details: { updated_at: payload.updated_at },
-        });
+    // Processar nova senha se preenchida
+    if (newPassword || confirmPassword) {
+      if (newPassword.length < 4) {
+        setErrorMsg('A nova senha deve ter pelo menos 4 caracteres.');
+        setSaving(false);
+        return;
       }
+      if (newPassword !== confirmPassword) {
+        setErrorMsg('As senhas digitadas não coincidem.');
+        setSaving(false);
+        return;
+      }
+      saveStoredAdminPassword(newPassword);
+      setNewPassword('');
+      setConfirmPassword('');
+    }
 
-      setSuccessMsg('Configurações e textos do site publicados com sucesso!');
-    } catch {
-      setErrorMsg('Erro inesperado ao salvar configurações.');
-    } finally {
-      setSaving(false);
-      setTimeout(() => setSuccessMsg(null), 4000);
+    // Salvar configurações no LocalStorage
+    saveStoredSettings(settings);
+    setSuccessMsg('Configurações do site e marca salvas com sucesso!');
+    setSaving(false);
+    setTimeout(() => setSuccessMsg(null), 4000);
+  };
+
+  const handleResetSettingsDefaults = () => {
+    if (confirm('Restaurar os textos e logo para a configuração padrão?')) {
+      setSettings(initialSiteSettings);
+      saveStoredSettings(initialSiteSettings);
+      setSuccessMsg('Configurações restauradas para o padrão!');
+      setTimeout(() => setSuccessMsg(null), 3000);
     }
   };
 
@@ -173,19 +130,29 @@ export default function AdminSettingsPage() {
             <Settings className="w-6 h-6 text-brand-cyan" />
             Configurações do Site & Marca
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Altere os textos do Hero, Benefícios, Rodapé, Logo da marca e metadados de SEO sem tocar no código.
+          <p className="text-xs sm:text-sm text-slate-300 mt-1 font-medium">
+            Altere os textos do Hero, Benefícios, Rodapé, Logo da marca e Senha de Acesso.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={handleResetSettingsDefaults}
+            title="Restaurar padrão"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-900 border border-slate-800"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Padrão</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowPreview(!showPreview)}
-            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs transition-colors border ${
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all border ${
               showPreview
-                ? 'bg-cyan-950 text-brand-cyan border-cyan-500/40'
-                : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white'
+                ? 'bg-cyan-950 text-brand-cyan border-cyan-500/50 shadow-neon-cyan'
+                : 'bg-slate-900 text-slate-200 border-slate-700 hover:text-white'
             }`}
           >
             <Eye className="w-4 h-4" />
@@ -196,14 +163,14 @@ export default function AdminSettingsPage() {
 
       {/* Alertas */}
       {successMsg && (
-        <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 text-sm flex items-center gap-3">
+        <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-sm flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
       {errorMsg && (
-        <div className="p-4 rounded-xl bg-red-950/70 border border-red-500/50 text-red-300 text-sm flex items-center gap-3">
+        <div className="p-4 rounded-xl bg-red-950/80 border border-red-500/50 text-red-200 text-sm flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
           <span>{errorMsg}</span>
         </div>
@@ -211,42 +178,44 @@ export default function AdminSettingsPage() {
 
       {/* Painel de Pré-visualização ao Vivo */}
       {showPreview && (
-        <div className="glass-card p-6 rounded-2xl border border-brand-cyan/40 bg-radial-gradient space-y-6">
+        <div className="glass-card p-6 rounded-2xl border border-brand-cyan/50 bg-radial-gradient space-y-6">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-brand-cyan flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4" />
+            <span className="text-xs font-extrabold uppercase tracking-wider text-brand-cyan flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-brand-lime" />
               Pré-visualização em tempo real da Landing Page
             </span>
             <span className="text-[11px] text-slate-400">Modo de Teste</span>
           </div>
 
           {/* Mini Header Preview */}
-          <div className="flex items-center justify-between p-3 bg-slate-950/80 rounded-xl border border-slate-800">
-            <div className="relative h-8 w-28">
-              <Image
-                src={settings.logo_url || '/logo.png'}
-                alt="Logo Preview"
-                fill
-                className="object-contain object-left"
-              />
+          <div className="flex items-center justify-between p-3 bg-slate-950/90 rounded-xl border border-slate-800">
+            <div className="logo-container py-0.5 px-2">
+              <div className="relative h-8 w-28">
+                <Image
+                  src={settings.logo_url || '/logo.png'}
+                  alt="Logo Preview"
+                  fill
+                  className="object-contain"
+                />
+              </div>
             </div>
-            <span className="text-xs text-brand-cyan font-semibold">Ver grupos ↓</span>
+            <span className="text-xs text-brand-cyan font-bold">Ver grupos ↓</span>
           </div>
 
           {/* Hero Preview */}
           <div className="text-center py-4 px-2 space-y-3">
-            <span className="inline-block text-[10px] font-bold px-3 py-1 rounded-full bg-cyan-950 text-brand-cyan border border-cyan-500/30">
+            <span className="inline-block text-[10px] font-extrabold px-3 py-1 rounded-full bg-cyan-950 text-brand-cyan border border-cyan-500/40">
               {settings.hero_badge}
             </span>
             <h2 className="text-lg font-extrabold text-white">{settings.hero_title}</h2>
             <p className="text-xs text-slate-300">{settings.hero_subtitle}</p>
             <div className="pt-2">
-              <span className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-xs bg-brand-whatsapp text-white shadow-lg">
+              <span className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-neon-lime">
                 <MessageCircle className="w-4 h-4" />
                 {settings.cta_text}
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1">
+            <p className="text-[11px] text-slate-300 flex items-center justify-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
               {settings.trust_text}
             </p>
@@ -260,23 +229,25 @@ export default function AdminSettingsPage() {
         <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
             <ImageIcon className="w-5 h-5 text-brand-cyan" />
-            Logo da Marca "Pedro Indica"
+            Logo Oficial da Marca "Pedro Indica"
           </h2>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="relative w-40 h-16 rounded-xl bg-slate-900 border border-slate-700 p-2 flex items-center justify-center">
-              <Image
-                src={settings.logo_url || '/logo.png'}
-                alt="Logo Atual"
-                fill
-                className="object-contain p-2"
-              />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
+            <div className="logo-container p-3">
+              <div className="relative w-40 h-16">
+                <Image
+                  src={settings.logo_url || '/logo.png'}
+                  alt="Logo Atual"
+                  fill
+                  className="object-contain"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
-              <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-brand-cyan cursor-pointer text-xs font-semibold text-white transition-colors">
+              <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-brand-cyan cursor-pointer text-xs font-bold text-white transition-colors shadow-sm">
                 <Upload className="w-4 h-4 text-brand-cyan" />
-                <span>{uploadingLogo ? 'Enviando nova logo...' : 'Substituir Logo'}</span>
+                <span>{uploadingLogo ? 'Carregando nova logo...' : 'Substituir Logo'}</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -286,16 +257,55 @@ export default function AdminSettingsPage() {
                 />
               </label>
               <p className="text-[11px] text-slate-400">
-                Formatos recomendados: PNG ou SVG transparente. Exibida no topo e login admin.
+                Formatos suportados: PNG, SVG ou JPG. Exibida com moldura iluminada no topo e login.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Bloco 2: Seção Hero */}
+        {/* Bloco 2: Alteração de Senha */}
         <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-            <Sparkles className="w-5 h-5 text-brand-lime" />
+            <Key className="w-5 h-5 text-brand-lime" />
+            Alterar Senha do Administrador
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Nova Senha
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Digite a nova senha..."
+                className="w-full bg-slate-900 border border-slate-700 focus:border-brand-cyan rounded-xl px-4 py-2.5 text-sm text-white outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Confirmar Nova Senha
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repita a nova senha..."
+                className="w-full bg-slate-900 border border-slate-700 focus:border-brand-cyan rounded-xl px-4 py-2.5 text-sm text-white outline-none"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            Deixe os campos de senha em branco se desejar manter a senha atual.
+          </p>
+        </div>
+
+        {/* Bloco 3: Seção Hero */}
+        <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
+          <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
+            <Sparkles className="w-5 h-5 text-brand-yellow" />
             Textos do Hero (Principal)
           </h2>
 
@@ -367,10 +377,10 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* Bloco 3: Benefícios */}
+        {/* Bloco 4: Benefícios */}
         <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-            <FileText className="w-5 h-5 text-brand-yellow" />
+            <FileText className="w-5 h-5 text-brand-magenta" />
             Seção de 3 Benefícios
           </h2>
 
@@ -390,7 +400,7 @@ export default function AdminSettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
             {/* Benefício 1 */}
             <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
-              <span className="text-xs font-bold text-brand-cyan">Benefício 1</span>
+              <span className="text-xs font-extrabold text-brand-cyan">Benefício 1</span>
               <input
                 type="text"
                 required
@@ -411,7 +421,7 @@ export default function AdminSettingsPage() {
 
             {/* Benefício 2 */}
             <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
-              <span className="text-xs font-bold text-brand-yellow">Benefício 2</span>
+              <span className="text-xs font-extrabold text-brand-yellow">Benefício 2</span>
               <input
                 type="text"
                 required
@@ -432,7 +442,7 @@ export default function AdminSettingsPage() {
 
             {/* Benefício 3 */}
             <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
-              <span className="text-xs font-bold text-brand-magenta">Benefício 3</span>
+              <span className="text-xs font-extrabold text-brand-magenta">Benefício 3</span>
               <input
                 type="text"
                 required
@@ -453,10 +463,10 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* Bloco 4: Rodapé & Disclaimer */}
+        {/* Bloco 5: Rodapé & Disclaimer */}
         <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
           <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-            <FileText className="w-5 h-5 text-brand-magenta" />
+            <FileText className="w-5 h-5 text-brand-cyan" />
             Rodapé & Avisos Legais
           </h2>
 
@@ -489,48 +499,12 @@ export default function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* Bloco 5: SEO & Compartilhamento */}
-        <div className="glass-card p-6 rounded-2xl border border-slate-800 space-y-4">
-          <h2 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-            <Search className="w-5 h-5 text-brand-cyan" />
-            Configurações de SEO e Compartilhamento Social
-          </h2>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Título Meta SEO (Aparece no Google)
-              </label>
-              <input
-                type="text"
-                required
-                value={settings.seo_title || ''}
-                onChange={(e) => setSettings({ ...settings, seo_title: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 focus:border-brand-cyan rounded-xl px-4 py-2.5 text-sm text-white outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Descrição Meta SEO
-              </label>
-              <textarea
-                rows={2}
-                required
-                value={settings.seo_description || ''}
-                onChange={(e) => setSettings({ ...settings, seo_description: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 focus:border-brand-cyan rounded-xl px-4 py-2.5 text-sm text-white outline-none resize-none"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Botão de Ação Flutuante/Fixo */}
+        {/* Botão de Ação */}
         <div className="pt-2 sticky bottom-4">
           <button
             type="submit"
             disabled={saving}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-xl font-bold text-sm text-slate-950 bg-brand-cyan hover:bg-cyan-300 transition-colors shadow-neon-cyan touch-target disabled:opacity-50"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-xl font-extrabold text-sm text-slate-950 bg-gradient-to-r from-brand-cyan to-brand-lime hover:from-cyan-300 hover:to-emerald-300 transition-all shadow-neon-cyan touch-target disabled:opacity-50"
           >
             {saving ? (
               <>

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { Group } from '@/lib/types';
 import { GroupSchema } from '@/lib/validations';
+import { getStoredGroups, saveStoredGroups } from '@/lib/local-storage';
+import { initialGroups } from '@/lib/data/initial-data';
 import {
   Plus,
   Edit2,
@@ -20,78 +21,11 @@ import {
   ExternalLink,
   X,
   Loader2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Download,
+  RotateCcw
 } from 'lucide-react';
 import Image from 'next/image';
-
-const defaultGroupsList: Group[] = [
-  {
-    id: 'g1',
-    title: 'Grupo 1 - Ofertas Diárias',
-    description: 'Principais cupons de desconto e achados imperdíveis de tecnologia, casa e moda.',
-    invite_link: 'https://chat.whatsapp.com/DexDPbamt3LHxb1qMZbqZl',
-    image_url: null,
-    badge: 'Mais popular',
-    is_popular: true,
-    is_active: true,
-    sort_order: 1,
-  },
-  {
-    id: 'g2',
-    title: 'Grupo 2 - Cupons Exclusivos',
-    description: 'Cupons testados e atualizados a todo momento para grandes lojas online.',
-    invite_link: 'https://chat.whatsapp.com/II7RwnGiu5oFyIWbMwnDdA',
-    image_url: null,
-    badge: 'Vagas limitadas',
-    is_popular: false,
-    is_active: true,
-    sort_order: 2,
-  },
-  {
-    id: 'g3',
-    title: 'Grupo 3 - Achadinhos do Pedro',
-    description: 'Promoções relâmpago e menor preço histórico garimpados diariamente.',
-    invite_link: 'https://chat.whatsapp.com/DtTTihP0wNq9YrBQaAVniP',
-    image_url: null,
-    badge: 'Seleção VIP',
-    is_popular: false,
-    is_active: true,
-    sort_order: 3,
-  },
-  {
-    id: 'g4',
-    title: 'Grupo 4 - Eletrônicos & Tech',
-    description: 'Smartphones, notebooks, fones e gadgets com super descontos.',
-    invite_link: 'https://chat.whatsapp.com/CcBPwQ7QNDCHw4l8P2w4bV',
-    image_url: null,
-    badge: 'Tecnologia',
-    is_popular: false,
-    is_active: true,
-    sort_order: 4,
-  },
-  {
-    id: 'g5',
-    title: 'Grupo 5 - Casa & Utilitários',
-    description: 'Eletrodomésticos, decoração e itens para o lar com preços especiais.',
-    invite_link: 'https://chat.whatsapp.com/K31ICDiu9K35QnfhZHxdps',
-    image_url: null,
-    badge: 'Casa & Lar',
-    is_popular: false,
-    is_active: true,
-    sort_order: 5,
-  },
-  {
-    id: 'g6',
-    title: 'Grupo 6 - Bug de Preço & Relâmpago',
-    description: 'Erros de precificação e ofertas ultra rápidas que duram poucos minutos.',
-    invite_link: 'https://chat.whatsapp.com/LXHsVJ7jojr81z39KGlsfM',
-    image_url: null,
-    badge: 'Alerta urgente',
-    is_popular: false,
-    is_active: true,
-    sort_order: 6,
-  },
-];
 
 export default function AdminGroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -119,32 +53,16 @@ export default function AdminGroupsPage() {
 
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  const supabase = createClient();
-
-  const fetchGroups = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('groups')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('created_at', { ascending: true });
-
-      if (error || !data || data.length === 0) {
-        setGroups(defaultGroupsList);
-      } else {
-        setGroups(data);
-      }
-    } catch {
-      setGroups(defaultGroupsList);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchGroups();
+    const loaded = getStoredGroups();
+    setGroups(loaded);
+    setLoading(false);
   }, []);
+
+  const persistGroups = (updated: Group[]) => {
+    setGroups(updated);
+    saveStoredGroups(updated);
+  };
 
   const openCreateModal = () => {
     setEditingGroup(null);
@@ -178,49 +96,25 @@ export default function AdminGroupsPage() {
     setIsModalOpen(true);
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploadingImage(true);
-    try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `group-${Date.now()}.${fileExt}`;
-      const filePath = `groups/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('pedro-indica-assets')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        // Se a storage não estiver configurada no Supabase ainda, converte para base64 data URL
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setFormData((prev) => ({ ...prev, image_url: reader.result as string }));
-          setUploadingImage(false);
-        };
-        reader.readAsDataURL(file);
-        return;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from('pedro-indica-assets')
-        .getPublicUrl(filePath);
-
-      setFormData((prev) => ({ ...prev, image_url: publicUrlData.publicUrl }));
-    } catch {
-      setErrorMsg('Falha ao enviar imagem. Verifique se o formato é válido.');
-    } finally {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormData((prev) => ({ ...prev, image_url: reader.result as string }));
       setUploadingImage(false);
-    }
+    };
+    reader.readAsDataURL(file);
   };
 
-  const handleSaveGroup = async (e: React.FormEvent) => {
+  const handleSaveGroup = (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setErrorMsg(null);
 
-    // Validação com Zod
+    // Validação Zod
     const validation = GroupSchema.safeParse({
       title: formData.title,
       description: formData.description || null,
@@ -233,18 +127,18 @@ export default function AdminGroupsPage() {
     });
 
     if (!validation.success) {
-      const firstError = validation.error.errors[0]?.message || 'Preencha os campos corretamente.';
-      setErrorMsg(firstError);
+      const firstErr = validation.error.errors[0]?.message || 'Verifique os campos informados.';
+      setErrorMsg(firstErr);
       setSaving(false);
       return;
     }
 
-    // Verificar duplicatas no estado local antes de salvar
-    const duplicateLink = groups.find(
-      (g) => g.invite_link.toLowerCase() === formData.invite_link.toLowerCase() && g.id !== editingGroup?.id
+    // Verificar links duplicados
+    const duplicate = groups.find(
+      (g) => g.invite_link.trim().toLowerCase() === formData.invite_link.trim().toLowerCase() && g.id !== editingGroup?.id
     );
 
-    if (duplicateLink) {
+    if (duplicate) {
       setErrorMsg('Este link de convite do WhatsApp já está cadastrado em outro grupo!');
       setSaving(false);
       return;
@@ -253,7 +147,7 @@ export default function AdminGroupsPage() {
     const payload = {
       title: formData.title,
       description: formData.description || null,
-      invite_link: formData.invite_link,
+      invite_link: formData.invite_link.trim(),
       badge: formData.badge || null,
       is_popular: formData.is_popular,
       is_active: formData.is_active,
@@ -262,87 +156,34 @@ export default function AdminGroupsPage() {
       updated_at: new Date().toISOString(),
     };
 
-    try {
-      if (editingGroup) {
-        // Atualizar
-        const { error } = await supabase
-          .from('groups')
-          .update(payload)
-          .eq('id', editingGroup.id);
-
-        if (error) {
-          if (error.code === '23505') {
-            setErrorMsg('Este link de convite do WhatsApp já está cadastrado no banco!');
-            setSaving(false);
-            return;
-          }
-          // Fallback para estado local
-          setGroups((prev) =>
-            prev.map((g) => (g.id === editingGroup.id ? { ...g, ...payload } : g))
-          );
-        } else {
-          await supabase.from('audit_logs').insert({
-            action: 'UPDATE_GROUP',
-            details: { groupId: editingGroup.id, title: payload.title },
-          });
-        }
-        setSuccessMsg(`Grupo "${payload.title}" atualizado com sucesso!`);
-      } else {
-        // Criar
-        const { data: newGroup, error } = await supabase
-          .from('groups')
-          .insert(payload)
-          .select()
-          .single();
-
-        if (error) {
-          if (error.code === '23505') {
-            setErrorMsg('Este link de convite do WhatsApp já está cadastrado!');
-            setSaving(false);
-            return;
-          }
-          // Fallback local
-          const createdFallback: Group = {
-            id: `g-${Date.now()}`,
-            ...payload,
-          };
-          setGroups((prev) => [...prev, createdFallback]);
-        } else if (newGroup) {
-          await supabase.from('audit_logs').insert({
-            action: 'CREATE_GROUP',
-            details: { groupId: newGroup.id, title: payload.title },
-          });
-          setGroups((prev) => [...prev, newGroup]);
-        }
-        setSuccessMsg(`Novo grupo "${payload.title}" criado com sucesso!`);
-      }
-
-      setIsModalOpen(false);
-      fetchGroups();
-    } catch {
-      setErrorMsg('Erro inesperado ao salvar grupo.');
-    } finally {
-      setSaving(false);
-      setTimeout(() => setSuccessMsg(null), 4000);
+    if (editingGroup) {
+      const updated = groups.map((g) => (g.id === editingGroup.id ? { ...g, ...payload } : g));
+      persistGroups(updated);
+      setSuccessMsg(`Grupo "${payload.title}" atualizado com sucesso!`);
+    } else {
+      const created: Group = {
+        id: `g-${Date.now()}`,
+        ...payload,
+      };
+      persistGroups([...groups, created]);
+      setSuccessMsg(`Novo grupo "${payload.title}" criado com sucesso!`);
     }
+
+    setIsModalOpen(false);
+    setSaving(false);
+    setTimeout(() => setSuccessMsg(null), 4000);
   };
 
-  const handleToggleActive = async (group: Group) => {
-    const updatedStatus = !group.is_active;
-    setGroups((prev) =>
-      prev.map((g) => (g.id === group.id ? { ...g, is_active: updatedStatus } : g))
+  const handleToggleActive = (group: Group) => {
+    const updated = groups.map((g) =>
+      g.id === group.id ? { ...g, is_active: !g.is_active } : g
     );
-
-    await supabase
-      .from('groups')
-      .update({ is_active: updatedStatus, updated_at: new Date().toISOString() })
-      .eq('id', group.id);
-
+    persistGroups(updated);
     setSuccessMsg(`Status do grupo "${group.title}" alterado.`);
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
-  const handleMoveOrder = async (group: Group, direction: 'up' | 'down') => {
+  const handleMoveOrder = (group: Group, direction: 'up' | 'down') => {
     const sorted = [...groups].sort((a, b) => a.sort_order - b.sort_order);
     const index = sorted.findIndex((g) => g.id === group.id);
     if ((direction === 'up' && index === 0) || (direction === 'down' && index === sorted.length - 1)) {
@@ -357,35 +198,24 @@ export default function AdminGroupsPage() {
     currentGroup.sort_order = targetGroup.sort_order;
     targetGroup.sort_order = tempOrder;
 
-    setGroups([...sorted]);
-
-    await Promise.all([
-      supabase.from('groups').update({ sort_order: currentGroup.sort_order }).eq('id', currentGroup.id),
-      supabase.from('groups').update({ sort_order: targetGroup.sort_order }).eq('id', targetGroup.id),
-    ]);
-
+    persistGroups([...sorted]);
     setSuccessMsg('Ordem dos grupos atualizada!');
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
-  const handleDeleteGroup = async () => {
+  const handleDeleteGroup = () => {
     if (!deleteConfirmGroup) return;
+    const updated = groups.filter((g) => g.id !== deleteConfirmGroup.id);
+    persistGroups(updated);
+    setSuccessMsg(`Grupo "${deleteConfirmGroup.title}" excluído.`);
+    setDeleteConfirmGroup(null);
+    setTimeout(() => setSuccessMsg(null), 4000);
+  };
 
-    setSaving(true);
-    try {
-      await supabase.from('groups').delete().eq('id', deleteConfirmGroup.id);
-      await supabase.from('audit_logs').insert({
-        action: 'DELETE_GROUP',
-        details: { groupId: deleteConfirmGroup.id, title: deleteConfirmGroup.title },
-      });
-
-      setGroups((prev) => prev.filter((g) => g.id !== deleteConfirmGroup.id));
-      setSuccessMsg(`Grupo "${deleteConfirmGroup.title}" excluído.`);
-      setDeleteConfirmGroup(null);
-    } catch {
-      setErrorMsg('Erro ao excluir grupo.');
-    } finally {
-      setSaving(false);
+  const handleResetDefaults = () => {
+    if (confirm('Deseja restaurar os 6 grupos originais de padrão?')) {
+      persistGroups(initialGroups);
+      setSuccessMsg('Grupos restaurados para o padrão original!');
       setTimeout(() => setSuccessMsg(null), 4000);
     }
   };
@@ -395,33 +225,45 @@ export default function AdminGroupsPage() {
       {/* Top Banner & Ações */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-card p-5 rounded-2xl border border-slate-800">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-white">
+          <h1 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
+            <MessageCircle className="w-6 h-6 text-brand-lime" />
             Gerenciamento de Grupos
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+          <p className="text-xs sm:text-sm text-slate-300 mt-1 font-medium">
             Cadastre, edite, reordene e ative/desative os links de WhatsApp públicos da landing page.
           </p>
         </div>
 
-        <button
-          onClick={openCreateModal}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm text-slate-950 bg-brand-lime hover:bg-emerald-400 transition-all shadow-neon-lime touch-target"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Novo Grupo</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleResetDefaults}
+            title="Restaurar padrão"
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-semibold text-xs text-slate-400 hover:text-white bg-slate-900 border border-slate-800"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Restaurar Padrão</span>
+          </button>
+
+          <button
+            onClick={openCreateModal}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm text-slate-950 bg-gradient-to-r from-brand-lime to-emerald-400 hover:from-lime-300 hover:to-emerald-300 transition-all shadow-neon-lime touch-target"
+          >
+            <Plus className="w-5 h-5 text-slate-950" />
+            <span>Novo Grupo</span>
+          </button>
+        </div>
       </div>
 
-      {/* Alertas de Sucesso/Erro */}
+      {/* Alertas */}
       {successMsg && (
-        <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 text-sm flex items-center gap-3">
+        <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-sm flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
       {errorMsg && (
-        <div className="p-4 rounded-xl bg-red-950/70 border border-red-500/50 text-red-300 text-sm flex items-center gap-3">
+        <div className="p-4 rounded-xl bg-red-950/80 border border-red-500/50 text-red-200 text-sm flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
           <span>{errorMsg}</span>
         </div>
@@ -431,7 +273,7 @@ export default function AdminGroupsPage() {
       {loading ? (
         <div className="p-12 text-center text-slate-400 glass-card rounded-2xl border border-slate-800">
           <Loader2 className="w-8 h-8 animate-spin mx-auto text-brand-cyan mb-3" />
-          <p className="text-sm">Carregando grupos de WhatsApp...</p>
+          <p className="text-sm">Carregando grupos...</p>
         </div>
       ) : groups.length === 0 ? (
         <div className="p-12 text-center text-slate-400 glass-card rounded-2xl border border-slate-800">
@@ -453,9 +295,9 @@ export default function AdminGroupsPage() {
               key={group.id}
               className={`glass-card p-4 sm:p-5 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                 !group.is_active
-                  ? 'opacity-50 bg-slate-950/50 border-slate-900'
+                  ? 'opacity-50 bg-slate-950/60 border-slate-900'
                   : group.is_popular
-                  ? 'border-emerald-500/40 bg-emerald-950/20'
+                  ? 'border-emerald-500/50 bg-emerald-950/20 shadow-neon-lime'
                   : 'border-slate-800 hover:border-slate-700'
               }`}
             >
@@ -472,23 +314,23 @@ export default function AdminGroupsPage() {
 
                 <div className="space-y-1">
                   <div className="flex items-center flex-wrap gap-2">
-                    <span className="text-xs font-bold text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                    <span className="text-xs font-extrabold text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                       #{index + 1}
                     </span>
                     <h3 className="text-base font-bold text-white">{group.title}</h3>
                     {group.is_popular && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/40">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/50 shadow-neon-lime">
                         <Star className="w-3 h-3 fill-emerald-300" />
                         Mais popular
                       </span>
                     )}
                     {group.badge && !group.is_popular && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-950 text-brand-cyan border border-cyan-500/30">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-950 text-brand-cyan border border-cyan-500/40">
                         {group.badge}
                       </span>
                     )}
                     {!group.is_active && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-950 text-red-400 border border-red-500/30">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-950 text-red-400 border border-red-500/40">
                         Inativo
                       </span>
                     )}
@@ -634,12 +476,12 @@ export default function AdminGroupsPage() {
                   placeholder="https://chat.whatsapp.com/..."
                   className="w-full bg-slate-900 border border-slate-700 focus:border-brand-cyan rounded-xl px-4 py-2.5 text-sm text-white font-mono outline-none"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Deve ser uma URL HTTPS válida do chat.whatsapp.com. Não são permitidos links duplicados.
+                <p className="text-[11px] text-slate-400 mt-1">
+                  URL válida do WhatsApp (chat.whatsapp.com ou wa.me).
                 </p>
               </div>
 
-              {/* Selo/Badge e Imagem */}
+              {/* Selo/Badge e Ordem */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -684,9 +526,9 @@ export default function AdminGroupsPage() {
                   )}
 
                   <div className="flex-1">
-                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:border-slate-500 cursor-pointer text-xs text-slate-300">
+                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:border-brand-cyan cursor-pointer text-xs text-slate-300">
                       <Upload className="w-4 h-4 text-brand-cyan" />
-                      <span>{uploadingImage ? 'Enviando...' : 'Carregar Imagem'}</span>
+                      <span>{uploadingImage ? 'Carregando...' : 'Carregar Imagem'}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -699,7 +541,7 @@ export default function AdminGroupsPage() {
                 </div>
               </div>
 
-              {/* Checkboxes: Mais Popular & Ativo */}
+              {/* Checkboxes */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-2">
                 <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-300">
                   <input
@@ -718,7 +560,7 @@ export default function AdminGroupsPage() {
                     onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
                     className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-brand-cyan focus:ring-brand-cyan"
                   />
-                  <span>Grupo Ativo na Landing Page</span>
+                  <span>Grupo Ativo no Site</span>
                 </label>
               </div>
 
@@ -735,7 +577,7 @@ export default function AdminGroupsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs text-slate-950 bg-brand-cyan hover:bg-cyan-300 shadow-neon-cyan disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-extrabold text-xs text-slate-950 bg-gradient-to-r from-brand-cyan to-brand-lime hover:from-cyan-300 hover:to-emerald-300 shadow-neon-cyan"
                 >
                   {saving ? (
                     <>
@@ -743,7 +585,7 @@ export default function AdminGroupsPage() {
                       <span>Salvando...</span>
                     </>
                   ) : (
-                    <span>Salvar Alterações</span>
+                    <span>Salvar Grupo</span>
                   )}
                 </button>
               </div>
@@ -752,7 +594,7 @@ export default function AdminGroupsPage() {
         </div>
       )}
 
-      {/* Modal de Confirmação de Exclusão */}
+      {/* Modal de Exclusão */}
       {deleteConfirmGroup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="w-full max-w-md glass-card p-6 rounded-2xl border border-red-500/40 text-center space-y-4">
@@ -762,7 +604,7 @@ export default function AdminGroupsPage() {
 
             <h3 className="text-lg font-bold text-white">Excluir Grupo?</h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Tem certeza que deseja excluir o grupo <strong className="text-white">"{deleteConfirmGroup.title}"</strong>? Esta ação não pode ser desfeita.
+              Tem certeza que deseja excluir o grupo <strong className="text-white">"{deleteConfirmGroup.title}"</strong>?
             </p>
 
             <div className="flex items-center justify-center gap-3 pt-2">
@@ -775,10 +617,9 @@ export default function AdminGroupsPage() {
 
               <button
                 onClick={handleDeleteGroup}
-                disabled={saving}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg"
               >
-                {saving ? 'Excluindo...' : 'Confirmar Exclusão'}
+                Confirmar Exclusão
               </button>
             </div>
           </div>
